@@ -1,6 +1,3 @@
-"""
-Bot command and message handlers with improved error handling.
-"""
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -13,13 +10,11 @@ from utils.logger import setup_logger
 logger = setup_logger(__name__)
 router = Router()
 
-
 @router.message(Command("start", "help"))
 async def cmd_help(message: Message):
     """Handle /start and /help commands."""
     user_id = message.from_user.id
     username = message.from_user.first_name or "User"
-    
     logger.info(f"User {user_id} ({username}) requested help")
     
     text = (
@@ -49,23 +44,18 @@ async def cmd_help(message: Message):
         "• Amounts can have commas or spaces (1,000.50 or 1 000,50)\n"
         "• Currency codes are case-insensitive (eur/usd or EUR/USD)"
     )
-    
     await message.answer(text, parse_mode="Markdown")
-
 
 @router.message(Command("pair"))
 async def cmd_pair(message: Message):
     """Handle /pair command to set currency pair."""
     user_id = message.from_user.id
-    
     try:
-        # Extract pair from command
         parts = message.text.split(maxsplit=1)
-        
         if len(parts) < 2:
             await message.answer(
-                "❌ Please specify a currency pair.\n\n"
-                "**Usage:** `/pair EUR/USD`\n\n"
+                "❌ Please specify a currency pair.\n
+                "\n**Usage:** `/pair EUR/USD`\n\n"
                 "Examples:\n"
                 "• `/pair EUR/USD`\n"
                 "• `/pair eur usd`\n"
@@ -75,12 +65,8 @@ async def cmd_pair(message: Message):
             )
             return
         
-        # Validate and normalize pair
         base, target = validate_pair_text(parts[1])
-        
-        # Store pair preference
         set_pair(user_id, base, target)
-        
         logger.info(f"User {user_id} set pair: {base}/{target}")
         
         await message.answer(
@@ -89,23 +75,17 @@ async def cmd_pair(message: Message):
             f"Example: `01.02.2020` or `100 today`",
             parse_mode="Markdown"
         )
-    
     except ValueError as e:
         logger.warning(f"Validation error for user {user_id}: {e}")
         await message.answer(str(e), parse_mode="Markdown")
-    
     except Exception as e:
         logger.error(f"Unexpected error in cmd_pair: {e}", exc_info=True)
-        await message.answer(
-            "❌ An error occurred. Please try again or contact support."
-        )
-
+        await message.answer("❌ An error occurred. Please try again or contact support.")
 
 @router.message(Command("reset"))
 async def cmd_reset(message: Message):
     """Handle /reset command to clear currency pair."""
     user_id = message.from_user.id
-    
     deleted = delete_pair(user_id)
     
     if deleted:
@@ -122,14 +102,12 @@ async def cmd_reset(message: Message):
             parse_mode="Markdown"
         )
 
-
 @router.message(F.text)
 async def on_date_or_amount(message: Message):
     """Handle text messages with dates and optional amounts."""
     user_id = message.from_user.id
     text = message.text.strip()
     
-    # Check if user has set a pair
     pair = get_pair(user_id)
     if not pair:
         logger.info(f"User {user_id} tried to query without setting pair")
@@ -142,16 +120,11 @@ async def on_date_or_amount(message: Message):
         return
     
     base, target = pair
-    
-    # Parse input: could be "DATE" or "AMOUNT DATE"
     amount = None
     date_text = text
     
-    # Try to extract amount from the beginning
     parts = text.split(maxsplit=1)
-    
     if len(parts) >= 2:
-        # Check if first part looks like a number
         first_part = parts[0].replace(',', '').replace(' ', '').replace('.', '', 1)
         if first_part.replace('.', '', 1).isdigit() or first_part.replace(',', '', 1).isdigit():
             try:
@@ -163,7 +136,6 @@ async def on_date_or_amount(message: Message):
                 await message.answer(str(e))
                 return
     
-    # Parse date
     try:
         date = parse_date_any(date_text)
         logger.debug(f"Parsed date: {date} from '{date_text}'")
@@ -180,15 +152,9 @@ async def on_date_or_amount(message: Message):
         )
         return
     
-    # Fetch exchange rate
     rate_result = None
-    
     try:
-        # Show typing indicator
-        await message.bot.send_chat_action(
-            chat_id=message.chat.id,
-            action="typing"
-        )
+        await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
         
         if base == "UAH":
             rate_result = await get_uah_rate(base, target, date)
@@ -200,15 +166,11 @@ async def on_date_or_amount(message: Message):
             logger.info(f"Fetched rate for {base}/{target} on {date}: {rate} (actual: {actual_date}, fallback: {is_fallback})")
         else:
             rate_result = None
-    
     except Exception as e:
         logger.error(f"Error fetching rate: {e}", exc_info=True)
-        await message.answer(
-            "❌ Failed to fetch exchange rate. Please try again later."
-        )
+        await message.answer("❌ Failed to fetch exchange rate. Please try again later.")
         return
     
-    # Check if rate was found
     if rate_result is None:
         logger.warning(f"No rate found for {base}/{target} on {date}")
         await message.answer(
@@ -224,18 +186,12 @@ async def on_date_or_amount(message: Message):
         return
     
     rate, actual_date, is_fallback = rate_result
-    
-    # Prepare fallback warning if date is different
     fallback_warning = ""
     if is_fallback:
         fallback_warning = f"\n\n⚠️ **Note:** Rate not available for {date}.\nUsing closest available date: **{actual_date}**"
     
-    # Format and send response
     if amount is not None:
-        # Calculate conversion
         result = amount * rate
-        
-        # Smart rounding based on amount size
         if result < 0.01:
             result_str = f"{result:.6f}"
         elif result < 1:
@@ -252,10 +208,8 @@ async def on_date_or_amount(message: Message):
             f"📊 Rate: 1 {base} = {rate:.6f} {target}"
             f"{fallback_warning}"
         )
-        
         logger.info(f"Conversion: {amount} {base} = {result_str} {target} on {actual_date}")
     else:
-        # Just show the rate
         response = (
             f"💱 **Exchange Rate**\n\n"
             f"**{base}/{target}**\n"
@@ -265,7 +219,6 @@ async def on_date_or_amount(message: Message):
             f"Example: `100 {actual_date}`"
             f"{fallback_warning}"
         )
-        
         logger.info(f"Rate query: {base}/{target} on {actual_date} = {rate}")
     
     await message.answer(response, parse_mode="Markdown")
