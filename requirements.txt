@@ -1,0 +1,5 @@
+```txt
+aiogram==3.*
+aiohttp
+python-dateutil
+```
