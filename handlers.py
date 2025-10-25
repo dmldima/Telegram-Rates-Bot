@@ -53,10 +53,9 @@ async def cmd_pair(message: Message):
     try:
         parts = message.text.split(maxsplit=1)
         if len(parts) < 2:
-    await message.answer(
-        "❌ Please specify a currency pair.\n\n"
-        "**Usage:** `/pair EUR/USD`\n\n"
-```
+            await message.answer(
+                "❌ Please specify a currency pair.\n\n"
+                "**Usage:** `/pair EUR/USD`\n\n"
                 "Examples:\n"
                 "• `/pair EUR/USD`\n"
                 "• `/pair eur usd`\n"
