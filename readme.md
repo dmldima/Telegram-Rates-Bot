@@ -6,14 +6,17 @@ Modern, production-ready Telegram bot for currency exchange rates with support f
 
 - **Smart Currency Pair Management**: Each user can set their preferred currency pair
 - **Flexible Date Parsing**: Supports multiple date formats (DD.MM.YYYY, YYYY-MM-DD, natural language)
-- **Amount Normalization**: Handles various number formats (1,000.50, 1 000,50, 1'000.50)
+- **Intelligent Fallback Dates**: If exact date unavailable, automatically finds closest previous date (within 7 days)
+- **Amount Normalization**: Handles various number formats (1,000.50, 1.000,50, 1 000,50, 1'000.50, 1.234.567,89)
 - **Intelligent Input Recognition**: Automatically corrects common typos in currency codes
-- **Two Data Sources**:
-  - **Frankfurter API** for major currency pairs
-  - **NBU API** for Ukrainian Hryvnia (UAH) pairs
+- **Multiple API Sources**:
+  - **Primary**: Frankfurter API for major currency pairs
+  - **Primary**: NBU API for Ukrainian Hryvnia (UAH) pairs
+  - **Backup**: ExchangeRate-API for current rates
 - **Production Ready**:
   - Retry logic with exponential backoff
-  - Response caching
+  - Response caching (1-hour TTL)
+  - Multiple API fallbacks
   - Comprehensive logging
   - Error handling
   - Optional Redis storage
@@ -72,7 +75,7 @@ Send amount + date:
 
 1. Clone the repository
 ```bash
-git clone 
+git clone <your-repo>
 cd currency-bot
 ```
 
