@@ -37,10 +37,14 @@ USE_REDIS: bool = bool(REDIS_URL)
 
 # Supported currency pairs
 SUPPORTED_PAIRS: Final[set[str]] = {
+    # Major pairs
     "EUR/USD", "EUR/GBP", "EUR/CHF", 
     "USD/EUR", "USD/GBP", "USD/CHF", 
     "EUR/SGD", "USD/SGD",
-    "UAH/EUR", "UAH/GBP", "UAH/USD",
+    # UAH pairs (UAH as base)
+    "UAH/EUR", "UAH/GBP", "UAH/USD", "UAH/CHF", "UAH/PLN",
+    # UAH pairs (UAH as target)
+    "USD/UAH", "EUR/UAH", "GBP/UAH", "CHF/UAH", "PLN/UAH",
 }
 
 # Currency code aliases
@@ -50,10 +54,12 @@ CURRENCY_ALIASES: Final[dict[str, str]] = {
     "ERU": "EUR", "eur": "EUR",
     "DOLLAR": "USD", "EURO": "EUR",
     "POUND": "GBP", "HRYVNIA": "UAH",
-    "ГРИВНА": "UAH",
+    "ГРИВНА": "UAH", "ГРИВНЯ": "UAH",
     "eur": "EUR", "usd": "USD",
     "gbp": "GBP", "chf": "CHF",
     "sgd": "SGD", "uah": "UAH",
+    "pln": "PLN", "PLN": "PLN",
+    "злотий": "PLN", "злотий": "PLN",
 }
 
 # Number format variations
