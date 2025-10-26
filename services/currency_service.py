@@ -112,6 +112,7 @@ async def _try_exchangerate_api_backup(base: str, target: str, requested_date: s
     return None
 
 async def get_major_rate(base: str, target: str, date: str) -> Optional[Tuple[float, str, bool]]:
+    """Get rate for major currencies (not involving UAH)."""
     cached = _get_cached_rate(base, target, date)
     if cached is not None:
         rate, actual_date = cached
@@ -140,48 +141,49 @@ async def get_major_rate(base: str, target: str, date: str) -> Optional[Tuple[fl
         logger.error(f"Error getting major rate: {e}")
         return None
 
-async def _get_closest_rate_nbu(base: str, target: str, requested_date: str) -> Optional[Tuple[float, str]]:
+async def _get_nbu_rate_for_currency(currency: str, requested_date: str) -> Optional[Tuple[float, str]]:
+    """Get UAH rate for a specific currency from NBU."""
     yyyymmdd = requested_date.replace("-", "")
-    url = f"{NBU_BASE_URL}?valcode={target}&date={yyyymmdd}&json"
+    url = f"{NBU_BASE_URL}?valcode={currency}&date={yyyymmdd}&json"
     data = await _http_json_with_retry(url)
     
     if data and isinstance(data, list) and len(data) > 0:
         rec = data[0]
-        uah_per_target = float(rec.get("rate", 0))
-        if uah_per_target > 0:
-            rate = 1.0 / uah_per_target
+        rate = float(rec.get("rate", 0))
+        if rate > 0:
             actual_date = rec.get("exchangedate", requested_date)
             if '.' in actual_date:
                 parts = actual_date.split('.')
                 if len(parts) == 3:
                     actual_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
             return (rate, actual_date)
+    return None
+
+async def _get_closest_rate_nbu(currency: str, requested_date: str) -> Optional[Tuple[float, str]]:
+    """Get NBU rate with fallback to previous dates."""
+    result = await _get_nbu_rate_for_currency(currency, requested_date)
+    if result:
+        return result
     
     if USE_FALLBACK_DATE:
-        logger.info(f"No NBU rate for {requested_date}, looking for closest previous date...")
+        logger.info(f"No NBU rate for {currency} on {requested_date}, looking for closest previous date...")
         req_date = datetime.strptime(requested_date, "%Y-%m-%d").date()
         
         for days_back in range(1, MAX_FALLBACK_DAYS + 1):
             fallback_date = req_date - timedelta(days=days_back)
-            fallback_yyyymmdd = fallback_date.strftime("%Y%m%d")
-            url = f"{NBU_BASE_URL}?valcode={target}&date={fallback_yyyymmdd}&json"
-            data = await _http_json_with_retry(url)
-            
-            if data and isinstance(data, list) and len(data) > 0:
-                rec = data[0]
-                uah_per_target = float(rec.get("rate", 0))
-                if uah_per_target > 0:
-                    rate = 1.0 / uah_per_target
-                    actual_date = fallback_date.strftime("%Y-%m-%d")
-                    logger.info(f"Found NBU rate from {actual_date} (fallback from {requested_date})")
-                    return (rate, actual_date)
+            result = await _get_nbu_rate_for_currency(currency, fallback_date.strftime("%Y-%m-%d"))
+            if result:
+                rate, _ = result
+                actual_date = fallback_date.strftime("%Y-%m-%d")
+                logger.info(f"Found NBU rate from {actual_date} (fallback from {requested_date})")
+                return (rate, actual_date)
     return None
 
 async def get_uah_rate(base: str, target: str, date: str) -> Optional[Tuple[float, str, bool]]:
-    if base != "UAH":
-        logger.error(f"get_uah_rate called with base={base}, expected UAH")
-        return None
-    
+    """
+    Get exchange rate for pairs involving UAH.
+    Supports: UAH/USD, UAH/EUR, etc. and USD/UAH, EUR/UAH, etc.
+    """
     cached = _get_cached_rate(base, target, date)
     if cached is not None:
         rate, actual_date = cached
@@ -189,13 +191,26 @@ async def get_uah_rate(base: str, target: str, date: str) -> Optional[Tuple[floa
         return (rate, actual_date, is_fallback)
     
     try:
-        result = await _get_closest_rate_nbu(base, target, date)
-        if result:
-            rate, actual_date = result
-            is_fallback = (actual_date != date)
-            _cache_rate(base, target, date, rate, actual_date)
-            logger.info(f"Rate {base}/{target} on {date}: {rate} (actual: {actual_date})")
-            return (rate, actual_date, is_fallback)
+        if base == "UAH":
+            # UAH/XXX: Get XXX rate from NBU, then invert (1 / rate)
+            result = await _get_closest_rate_nbu(target, date)
+            if result:
+                uah_per_target, actual_date = result
+                rate = 1.0 / uah_per_target  # Convert to target per UAH
+                is_fallback = (actual_date != date)
+                _cache_rate(base, target, date, rate, actual_date)
+                logger.info(f"Rate {base}/{target} on {date}: {rate} (actual: {actual_date})")
+                return (rate, actual_date, is_fallback)
+        
+        elif target == "UAH":
+            # XXX/UAH: Get XXX rate from NBU directly
+            result = await _get_closest_rate_nbu(base, date)
+            if result:
+                rate, actual_date = result  # This is already UAH per base currency
+                is_fallback = (actual_date != date)
+                _cache_rate(base, target, date, rate, actual_date)
+                logger.info(f"Rate {base}/{target} on {date}: {rate} (actual: {actual_date})")
+                return (rate, actual_date, is_fallback)
         
         logger.warning(f"No NBU rate found for {base}/{target} on {date}")
         return None
