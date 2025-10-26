@@ -10,6 +10,18 @@ from utils.logger import setup_logger
 logger = setup_logger(__name__)
 router = Router()
 
+
+def format_date_european(iso_date: str) -> str:
+    """Convert YYYY-MM-DD to DD.MM.YYYY"""
+    try:
+        parts = iso_date.split('-')
+        if len(parts) == 3:
+            return f"{parts[2]}.{parts[1]}.{parts[0]}"
+        return iso_date
+    except:
+        return iso_date
+
+
 @router.message(Command("start", "help"))
 async def cmd_help(message: Message):
     """Handle /start and /help commands."""
@@ -18,33 +30,34 @@ async def cmd_help(message: Message):
     logger.info(f"User {user_id} ({username}) requested help")
     
     text = (
-        f"👋 Hi {username}!\n\n"
+        f"👋 Привіт, {username}!\n\n"
         "💱 **Currency Rate Bot**\n\n"
-        "**Commands:**\n"
-        "• `/pair BASE/TARGET` — set your currency pair\n"
-        "  Example: `/pair EUR/USD` or `/pair eur usd`\n"
-        "• `/reset` — reset your currency pair\n"
-        "• `/help` — show this message\n\n"
-        "**Usage:**\n"
-        "1️⃣ Set your pair first: `/pair EUR/USD`\n"
-        "2️⃣ Send a date to get the rate:\n"
-        "   • `01.02.2020`\n"
-        "   • `2020-02-01`\n"
+        "**Команди:**\n"
+        "• `/pair BASE/TARGET` — встановити валютну пару\n"
+        "  Приклад: `/pair EUR/USD` або `/pair uah usd`\n"
+        "• `/reset` — скинути валютну пару\n"
+        "• `/help` — показати це повідомлення\n\n"
+        "**Використання:**\n"
+        "1️⃣ Спочатку встановіть пару: `/pair UAH/USD`\n"
+        "2️⃣ Надішліть дату для отримання курсу:\n"
+        "   • `21.04.2025`\n"
         "   • `today`, `yesterday`\n"
         "   • `2 days ago`\n"
-        "3️⃣ Send amount + date for conversion:\n"
-        "   • `100 01.02.2020`\n"
-        "   • `1,000.50 today`\n"
+        "3️⃣ Надішліть суму + дату для конвертації:\n"
+        "   • `100 21.04.2025`\n"
+        "   • `1000,50 today`\n"
         "   • `1 000,50 yesterday`\n\n"
-        "**Supported pairs:**\n"
-        "Major: EUR/USD, EUR/GBP, EUR/CHF, USD/EUR, USD/GBP, USD/CHF, EUR/SGD, USD/SGD\n"
-        "UAH: UAH/EUR, UAH/GBP, UAH/USD\n\n"
-        "💡 **Tips:**\n"
-        "• You can use different date formats (DD.MM.YYYY, YYYY-MM-DD, etc.)\n"
-        "• Amounts can have commas or spaces (1,000.50 or 1 000,50)\n"
-        "• Currency codes are case-insensitive (eur/usd or EUR/USD)"
+        "**Підтримувані пари:**\n"
+        "Основні: EUR/USD, EUR/GBP, EUR/CHF, USD/EUR, USD/GBP, USD/CHF\n"
+        "UAH: UAH/USD, UAH/EUR, UAH/GBP, UAH/CHF, UAH/PLN\n"
+        "      USD/UAH, EUR/UAH, GBP/UAH, CHF/UAH, PLN/UAH\n\n"
+        "💡 **Підказки:**\n"
+        "• Дати у форматі ДД.ММ.РРРР або РРРР-ММ-ДД\n"
+        "• Коди валют: UAH, USD, EUR, GBP, CHF, PLN\n"
+        "• Суми з комами або пробілами: 1,000.50 або 1 000,50"
     )
     await message.answer(text, parse_mode="Markdown")
+
 
 @router.message(Command("pair"))
 async def cmd_pair(message: Message):
@@ -54,13 +67,13 @@ async def cmd_pair(message: Message):
         parts = message.text.split(maxsplit=1)
         if len(parts) < 2:
             await message.answer(
-                "❌ Please specify a currency pair.\n\n"
-                "**Usage:** `/pair EUR/USD`\n\n"
-                "Examples:\n"
-                "• `/pair EUR/USD`\n"
-                "• `/pair eur usd`\n"
-                "• `/pair EUR-GBP`\n"
-                "• `/pair uah/usd`",
+                "❌ Будь ласка, вкажіть валютну пару.\n\n"
+                "**Використання:** `/pair UAH/USD`\n\n"
+                "Приклади:\n"
+                "• `/pair UAH/USD`\n"
+                "• `/pair uah usd`\n"
+                "• `/pair EUR/UAH`\n"
+                "• `/pair PLN/UAH`",
                 parse_mode="Markdown"
             )
             return
@@ -70,9 +83,9 @@ async def cmd_pair(message: Message):
         logger.info(f"User {user_id} set pair: {base}/{target}")
         
         await message.answer(
-            f"✅ Currency pair set to **{base}/{target}**\n\n"
-            f"Now you can send dates to get rates!\n"
-            f"Example: `01.02.2020` or `100 today`",
+            f"✅ Валютну пару встановлено: **{base}/{target}**\n\n"
+            f"Тепер можете надсилати дати для отримання курсів!\n"
+            f"Приклад: `21.04.2025` або `100 today`",
             parse_mode="Markdown"
         )
     except ValueError as e:
@@ -80,7 +93,8 @@ async def cmd_pair(message: Message):
         await message.answer(str(e), parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Unexpected error in cmd_pair: {e}", exc_info=True)
-        await message.answer("❌ An error occurred. Please try again or contact support.")
+        await message.answer("❌ Сталася помилка. Спробуйте ще раз.")
+
 
 @router.message(Command("reset"))
 async def cmd_reset(message: Message):
@@ -91,16 +105,17 @@ async def cmd_reset(message: Message):
     if deleted:
         logger.info(f"User {user_id} reset their pair")
         await message.answer(
-            "✅ Your currency pair has been reset.\n"
-            "Use `/pair EUR/USD` to set a new one.",
+            "✅ Вашу валютну пару скинуто.\n"
+            "Використайте `/pair UAH/USD` щоб встановити нову.",
             parse_mode="Markdown"
         )
     else:
         await message.answer(
-            "ℹ️ You don't have a currency pair set.\n"
-            "Use `/pair EUR/USD` to set one.",
+            "ℹ️ У вас немає встановленої валютної пари.\n"
+            "Використайте `/pair UAH/USD` щоб встановити.",
             parse_mode="Markdown"
         )
+
 
 @router.message(F.text)
 async def on_date_or_amount(message: Message):
@@ -112,9 +127,9 @@ async def on_date_or_amount(message: Message):
     if not pair:
         logger.info(f"User {user_id} tried to query without setting pair")
         await message.answer(
-            "⚠️ Please set a currency pair first!\n\n"
-            "Use: `/pair EUR/USD`\n\n"
-            "See `/help` for more information.",
+            "⚠️ Будь ласка, спочатку встановіть валютну пару!\n\n"
+            "Використайте: `/pair UAH/USD`\n\n"
+            "Див. `/help` для детальної інформації.",
             parse_mode="Markdown"
         )
         return
@@ -146,8 +161,8 @@ async def on_date_or_amount(message: Message):
     except Exception as e:
         logger.error(f"Unexpected error parsing date: {e}", exc_info=True)
         await message.answer(
-            "❌ Could not parse date. Please use a valid format.\n"
-            "Examples: `01.02.2020`, `2020-02-01`, `today`",
+            "❌ Не вдалося розпізнати дату. Використовуйте правильний формат.\n"
+            "Приклади: `21.04.2025`, `2025-04-21`, `today`",
             parse_mode="Markdown"
         )
         return
@@ -156,7 +171,8 @@ async def on_date_or_amount(message: Message):
     try:
         await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
         
-        if base == "UAH":
+        # Determine which API to use
+        if base == "UAH" or target == "UAH":
             rate_result = await get_uah_rate(base, target, date)
         else:
             rate_result = await get_major_rate(base, target, date)
@@ -168,27 +184,29 @@ async def on_date_or_amount(message: Message):
             rate_result = None
     except Exception as e:
         logger.error(f"Error fetching rate: {e}", exc_info=True)
-        await message.answer("❌ Failed to fetch exchange rate. Please try again later.")
+        await message.answer("❌ Не вдалося отримати курс обміну. Спробуйте пізніше.")
         return
     
     if rate_result is None:
         logger.warning(f"No rate found for {base}/{target} on {date}")
         await message.answer(
-            f"❌ No exchange rate data available for **{base}/{target}** on {date}.\n\n"
-            "This could happen if:\n"
-            "• The date is too old (check API limits)\n"
-            "• The date is in the future\n"
-            "• It's a weekend/holiday (try a business day)\n"
-            "• The API is temporarily unavailable\n\n"
-            "💡 Try a different date or use `/help` for more info.",
+            f"❌ Немає даних про курс обміну для **{base}/{target}** на {format_date_european(date)}.\n\n"
+            "Це може статися якщо:\n"
+            "• Дата надто стара\n"
+            "• Дата у майбутньому\n"
+            "• Це вихідний/свято (спробуйте робочий день)\n"
+            "• API тимчасово недоступне\n\n"
+            "💡 Спробуйте іншу дату або `/help` для інформації.",
             parse_mode="Markdown"
         )
         return
     
     rate, actual_date, is_fallback = rate_result
+    actual_date_eu = format_date_european(actual_date)
+    
     fallback_warning = ""
     if is_fallback:
-        fallback_warning = f"\n\n⚠️ **Note:** Rate not available for {date}.\nUsing closest available date: **{actual_date}**"
+        fallback_warning = f"\n\n⚠️ **Увага:** Курс недоступний на {format_date_european(date)}.\nВикористано найближчу дату: **{actual_date_eu}**"
     
     if amount is not None:
         result = amount * rate
@@ -202,21 +220,21 @@ async def on_date_or_amount(message: Message):
             result_str = f"{result:,.2f}"
         
         response = (
-            f"💵 **Conversion Result**\n\n"
+            f"💵 **Результат Конвертації**\n\n"
             f"`{amount:,.2f} {base}` = **{result_str} {target}**\n\n"
-            f"📅 Date: {actual_date}\n"
-            f"📊 Rate: 1 {base} = {rate:.6f} {target}"
+            f"📅 Дата: {actual_date_eu}\n"
+            f"📊 Курс: 1 {base} = {rate:.6f} {target}"
             f"{fallback_warning}"
         )
         logger.info(f"Conversion: {amount} {base} = {result_str} {target} on {actual_date}")
     else:
         response = (
-            f"💱 **Exchange Rate**\n\n"
+            f"💱 **Курс Обміну**\n\n"
             f"**{base}/{target}**\n"
             f"1 {base} = **{rate:.6f} {target}**\n\n"
-            f"📅 Date: {actual_date}\n\n"
-            f"💡 Tip: Send `amount date` to convert\n"
-            f"Example: `100 {actual_date}`"
+            f"📅 Дата: {actual_date_eu}\n\n"
+            f"💡 Підказка: Надішліть `сума дата` для конвертації\n"
+            f"Приклад: `100 {actual_date_eu}`"
             f"{fallback_warning}"
         )
         logger.info(f"Rate query: {base}/{target} on {actual_date} = {rate}")
