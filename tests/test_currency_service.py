@@ -78,3 +78,34 @@ class TestUahRate:
     async def test_no_data_returns_none(self, monkeypatch):
         _mock_http(monkeypatch, {})
         assert await cs.get_uah_rate("USD", "UAH", "2025-04-21") is None
+
+
+class TestNegativeCache:
+    async def test_no_data_is_not_refetched(self, monkeypatch):
+        calls = {"n": 0}
+
+        async def fake(url, max_retries=cs.MAX_RETRIES):
+            calls["n"] += 1
+            return None  # always "no data"
+
+        monkeypatch.setattr(cs, "_http_json_with_retry", fake)
+
+        assert await cs.get_major_rate("EUR", "USD", "2025-04-21") is None
+        first_round = calls["n"]
+        assert first_round > 1  # did the fallback sweep
+
+        assert await cs.get_major_rate("EUR", "USD", "2025-04-21") is None
+        assert calls["n"] == first_round  # second query served from negative cache
+
+    async def test_negative_cache_cleared_on_success(self, monkeypatch):
+        _mock_http(monkeypatch, {})
+        assert await cs.get_major_rate("EUR", "USD", "2025-04-21") is None
+        assert cs._is_negatively_cached("EUR", "USD", "2025-04-21")
+
+        _mock_http(monkeypatch, {
+            "2025-04-21": {"date": "2025-04-21", "rates": {"USD": 1.1}},
+        })
+        cs._negative_cache.clear()  # simulate TTL expiry
+        result = await cs.get_major_rate("EUR", "USD", "2025-04-21")
+        assert result == (1.1, "2025-04-21", False)
+        assert not cs._is_negatively_cached("EUR", "USD", "2025-04-21")
