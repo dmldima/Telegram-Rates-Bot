@@ -1,6 +1,7 @@
 import re
 from datetime import datetime, date, timedelta
 from dateutil import parser as dtparser
+from dateutil.relativedelta import relativedelta
 from typing import Optional
 from utils.logger import setup_logger
 
@@ -42,14 +43,15 @@ def parse_date_any(date_text: str, fuzzy: bool = True) -> str:
         amount = int(relative_match.group(1))
         unit = relative_match.group(2)
         if 'day' in unit or 'день' in unit or 'дн' in unit:
-            delta = timedelta(days=amount)
+            result_date = today - timedelta(days=amount)
         elif 'week' in unit or 'тиждень' in unit or 'тижн' in unit:
-            delta = timedelta(weeks=amount)
+            result_date = today - timedelta(weeks=amount)
         elif 'month' in unit or 'місяц' in unit:
-            delta = timedelta(days=amount * 30)
+            # Calendar-accurate month arithmetic (not a 30-day approximation)
+            result_date = today - relativedelta(months=amount)
         else:
-            delta = timedelta(days=0)
-        return (today - delta).strftime("%Y-%m-%d")
+            result_date = today
+        return result_date.strftime("%Y-%m-%d")
     
     nums = _split_nums(s)
     yearfirst = False

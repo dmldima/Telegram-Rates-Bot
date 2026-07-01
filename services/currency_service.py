@@ -14,6 +14,36 @@ logger = setup_logger(__name__)
 _rate_cache: dict[str, tuple[float, datetime, str]] = {}
 CACHE_TTL = timedelta(hours=1)
 
+# Negative cache: remembers "no data" results so we don't repeat the expensive
+# fallback sweep (up to MAX_FALLBACK_DAYS sequential HTTP calls) on every retry
+# of the same missing pair/date. TTL is short because a rate for a recent date
+# may be published later the same day.
+_negative_cache: dict[str, datetime] = {}
+NEGATIVE_CACHE_TTL = timedelta(minutes=15)
+
+# A single aiohttp session is shared across all requests for the lifetime of
+# the app. Creating a new ClientSession per request (as before) opens a fresh
+# TCP connection pool every time, which is a significant, avoidable overhead.
+_session: Optional[aiohttp.ClientSession] = None
+
+
+def _get_session() -> aiohttp.ClientSession:
+    """Return the shared aiohttp session, creating it lazily on first use."""
+    global _session
+    if _session is None or _session.closed:
+        timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
+        _session = aiohttp.ClientSession(timeout=timeout)
+    return _session
+
+
+async def close_session() -> None:
+    """Close the shared session. Call on application shutdown."""
+    global _session
+    if _session is not None and not _session.closed:
+        await _session.close()
+        _session = None
+        logger.info("HTTP session closed")
+
 def _get_cache_key(base: str, target: str, date: str) -> str:
     return f"{base}/{target}:{date}"
 
@@ -31,28 +61,44 @@ def _get_cached_rate(base: str, target: str, date: str) -> Optional[Tuple[float,
 def _cache_rate(base: str, target: str, requested_date: str, rate: float, actual_date: str) -> None:
     key = _get_cache_key(base, target, requested_date)
     _rate_cache[key] = (rate, datetime.now(), actual_date)
+    _negative_cache.pop(key, None)
     logger.debug(f"Cached rate for {key}: {rate} (actual date: {actual_date})")
+
+def _is_negatively_cached(base: str, target: str, date: str) -> bool:
+    key = _get_cache_key(base, target, date)
+    ts = _negative_cache.get(key)
+    if ts is None:
+        return False
+    if datetime.now() - ts < NEGATIVE_CACHE_TTL:
+        logger.debug(f"Negative cache hit for {key}")
+        return True
+    del _negative_cache[key]
+    return False
+
+def _cache_negative(base: str, target: str, date: str) -> None:
+    key = _get_cache_key(base, target, date)
+    _negative_cache[key] = datetime.now()
+    logger.debug(f"Cached negative result for {key}")
 
 async def _http_json_with_retry(url: str, max_retries: int = MAX_RETRIES) -> Optional[dict]:
     last_error = None
+    session = _get_session()
     for attempt in range(max_retries):
         try:
-            timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        logger.debug(f"Successfully fetched {url}")
-                        return data
-                    elif resp.status == 404:
-                        logger.warning(f"Data not found: {url}")
-                        return None
-                    elif resp.status >= 500:
-                        logger.warning(f"Server error {resp.status}, retrying...")
-                        last_error = f"Server error: {resp.status}"
-                    else:
-                        logger.error(f"Client error {resp.status}: {url}")
-                        return None
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    logger.debug(f"Successfully fetched {url}")
+                    return data
+                elif resp.status == 404:
+                    logger.warning(f"Data not found: {url}")
+                    return None
+                elif resp.status >= 500:
+                    logger.warning(f"Server error {resp.status}, retrying...")
+                    last_error = f"Server error: {resp.status}"
+                else:
+                    logger.error(f"Client error {resp.status}: {url}")
+                    return None
         except asyncio.TimeoutError:
             last_error = "Request timeout"
             logger.warning(f"Timeout on attempt {attempt + 1}/{max_retries}")
@@ -118,7 +164,10 @@ async def get_major_rate(base: str, target: str, date: str) -> Optional[Tuple[fl
         rate, actual_date = cached
         is_fallback = (actual_date != date)
         return (rate, actual_date, is_fallback)
-    
+
+    if _is_negatively_cached(base, target, date):
+        return None
+
     try:
         result = await _get_closest_rate_frankfurter(base, target, date)
         if result:
@@ -127,15 +176,16 @@ async def get_major_rate(base: str, target: str, date: str) -> Optional[Tuple[fl
             _cache_rate(base, target, date, rate, actual_date)
             logger.info(f"Rate {base}/{target} on {date}: {rate} (actual: {actual_date})")
             return (rate, actual_date, is_fallback)
-        
+
         result = await _try_exchangerate_api_backup(base, target, date)
         if result:
             rate, actual_date = result
             is_fallback = (actual_date != date)
             _cache_rate(base, target, date, rate, actual_date)
             return (rate, actual_date, is_fallback)
-        
+
         logger.warning(f"No rate found for {base}/{target} on {date}")
+        _cache_negative(base, target, date)
         return None
     except Exception as e:
         logger.error(f"Error getting major rate: {e}")
@@ -189,7 +239,10 @@ async def get_uah_rate(base: str, target: str, date: str) -> Optional[Tuple[floa
         rate, actual_date = cached
         is_fallback = (actual_date != date)
         return (rate, actual_date, is_fallback)
-    
+
+    if _is_negatively_cached(base, target, date):
+        return None
+
     try:
         if base == "UAH":
             # UAH/XXX: Get XXX rate from NBU, then invert (1 / rate)
@@ -213,6 +266,7 @@ async def get_uah_rate(base: str, target: str, date: str) -> Optional[Tuple[floa
                 return (rate, actual_date, is_fallback)
         
         logger.warning(f"No NBU rate found for {base}/{target} on {date}")
+        _cache_negative(base, target, date)
         return None
     except Exception as e:
         logger.error(f"Error getting UAH rate: {e}")
@@ -221,6 +275,7 @@ async def get_uah_rate(base: str, target: str, date: str) -> Optional[Tuple[floa
 def clear_cache() -> int:
     count = len(_rate_cache)
     _rate_cache.clear()
+    _negative_cache.clear()
     logger.info(f"Cleared {count} cached rates")
     return count
 
