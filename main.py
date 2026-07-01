@@ -7,6 +7,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from aiohttp import web
 from handlers import router
 from config import BOT_TOKEN, WEBHOOK_URL, PORT
+from services.currency_service import close_session
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -49,6 +50,7 @@ def create_app() -> web.Application:
         try:
             await bot.delete_webhook(drop_pending_updates=True)
             logger.info("Webhook deleted")
+            await close_session()
             await bot.session.close()
             logger.info("Bot session closed")
         except Exception as e:

@@ -1,3 +1,4 @@
+from datetime import date as date_cls
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -10,6 +11,22 @@ from utils.logger import setup_logger
 logger = setup_logger(__name__)
 router = Router()
 
+# Characters that carry meaning in Telegram's legacy Markdown parse mode.
+# User-provided text (e.g. first_name) must be stripped of these before being
+# interpolated into a Markdown message, otherwise it breaks formatting.
+_MARKDOWN_CONTROL_CHARS = ("_", "*", "`", "[")
+
+# Characters that may legitimately appear in a numeric amount (digits plus
+# thousands/decimal separators). Used to tell an amount apart from a date.
+_AMOUNT_CHARS = set("0123456789 .,'_")
+
+
+def sanitize_markdown(text: str) -> str:
+    """Neutralize legacy-Markdown control characters in user-provided text."""
+    for ch in _MARKDOWN_CONTROL_CHARS:
+        text = text.replace(ch, "")
+    return text
+
 
 def format_date_european(iso_date: str) -> str:
     """Convert YYYY-MM-DD to DD.MM.YYYY"""
@@ -18,16 +35,41 @@ def format_date_european(iso_date: str) -> str:
         if len(parts) == 3:
             return f"{parts[2]}.{parts[1]}.{parts[0]}"
         return iso_date
-    except:
+    except Exception:
         return iso_date
+
+
+def _is_amount_like(text: str) -> bool:
+    """True if text looks like a numeric amount (digits + number separators)."""
+    return bool(text) and any(c.isdigit() for c in text) and all(c in _AMOUNT_CHARS for c in text)
+
+
+def split_amount_and_date(text: str):
+    """Split a message into (amount_str, date_text).
+
+    The date is always the last whitespace-delimited token; everything before
+    it is treated as the amount, but only if that leading part actually looks
+    like a number. This correctly handles space-separated thousands
+    (``1 000,50 yesterday``) and never mistakes a relative-date phrase
+    (``2 days ago``) for an amount, since those contain unit words.
+    Returns (None, text) when there is no amount.
+    """
+    tokens = text.split()
+    if len(tokens) < 2:
+        return None, text
+    *amount_part, date_part = tokens
+    amount_str = " ".join(amount_part)
+    if _is_amount_like(amount_str):
+        return amount_str, date_part
+    return None, text
 
 
 @router.message(Command("start", "help"))
 async def cmd_help(message: Message):
     """Handle /start and /help commands."""
     user_id = message.from_user.id
-    username = message.from_user.first_name or "User"
-    logger.info(f"User {user_id} ({username}) requested help")
+    username = sanitize_markdown(message.from_user.first_name or "User")
+    logger.info(f"User {user_id} requested help")
     
     text = (
         f"👋 Привіт, {username}!\n\n"
@@ -48,7 +90,7 @@ async def cmd_help(message: Message):
         "   • `1000,50 today`\n"
         "   • `1 000,50 yesterday`\n\n"
         "**Підтримувані пари:**\n"
-        "Основні: EUR/USD, EUR/GBP, EUR/CHF, USD/EUR, USD/GBP, USD/CHF\n"
+        "Основні: EUR/USD, EUR/GBP, EUR/CHF, USD/EUR, USD/GBP, USD/CHF, EUR/SGD, USD/SGD\n"
         "UAH: UAH/USD, UAH/EUR, UAH/GBP, UAH/CHF, UAH/PLN\n"
         "      USD/UAH, EUR/UAH, GBP/UAH, CHF/UAH, PLN/UAH\n\n"
         "💡 **Підказки:**\n"
@@ -79,7 +121,7 @@ async def cmd_pair(message: Message):
             return
         
         base, target = validate_pair_text(parts[1])
-        set_pair(user_id, base, target)
+        await set_pair(user_id, base, target)
         logger.info(f"User {user_id} set pair: {base}/{target}")
         
         await message.answer(
@@ -100,7 +142,7 @@ async def cmd_pair(message: Message):
 async def cmd_reset(message: Message):
     """Handle /reset command to clear currency pair."""
     user_id = message.from_user.id
-    deleted = delete_pair(user_id)
+    deleted = await delete_pair(user_id)
     
     if deleted:
         logger.info(f"User {user_id} reset their pair")
@@ -123,7 +165,7 @@ async def on_date_or_amount(message: Message):
     user_id = message.from_user.id
     text = message.text.strip()
     
-    pair = get_pair(user_id)
+    pair = await get_pair(user_id)
     if not pair:
         logger.info(f"User {user_id} tried to query without setting pair")
         await message.answer(
@@ -136,21 +178,17 @@ async def on_date_or_amount(message: Message):
     
     base, target = pair
     amount = None
-    date_text = text
-    
-    parts = text.split(maxsplit=1)
-    if len(parts) >= 2:
-        first_part = parts[0].replace(',', '').replace(' ', '').replace('.', '', 1)
-        if first_part.replace('.', '', 1).isdigit() or first_part.replace(',', '', 1).isdigit():
-            try:
-                amount = normalize_amount(parts[0])
-                date_text = parts[1]
-                logger.debug(f"Extracted amount: {amount}, date: {date_text}")
-            except ValueError as e:
-                logger.warning(f"Failed to parse amount: {e}")
-                await message.answer(str(e))
-                return
-    
+
+    amount_str, date_text = split_amount_and_date(text)
+    if amount_str is not None:
+        try:
+            amount = normalize_amount(amount_str)
+            logger.debug(f"Extracted amount: {amount}, date: {date_text}")
+        except ValueError as e:
+            logger.warning(f"Failed to parse amount: {e}")
+            await message.answer(str(e))
+            return
+
     try:
         date = parse_date_any(date_text)
         logger.debug(f"Parsed date: {date} from '{date_text}'")
@@ -166,22 +204,32 @@ async def on_date_or_amount(message: Message):
             parse_mode="Markdown"
         )
         return
-    
+
+    # Rates for future dates don't exist yet — tell the user directly instead
+    # of firing a doomed API request that would just time out with "no data".
+    if date > date_cls.today().strftime("%Y-%m-%d"):
+        logger.info(f"User {user_id} requested a future date: {date}")
+        await message.answer(
+            f"📅 Дата {format_date_european(date)} ще не настала — "
+            "курс на майбутнє недоступний.\n\n"
+            "Спробуйте `today` або минулу дату.",
+            parse_mode="Markdown"
+        )
+        return
+
     rate_result = None
     try:
         await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
-        
+
         # Determine which API to use
         if base == "UAH" or target == "UAH":
             rate_result = await get_uah_rate(base, target, date)
         else:
             rate_result = await get_major_rate(base, target, date)
-        
+
         if rate_result:
             rate, actual_date, is_fallback = rate_result
             logger.info(f"Fetched rate for {base}/{target} on {date}: {rate} (actual: {actual_date}, fallback: {is_fallback})")
-        else:
-            rate_result = None
     except Exception as e:
         logger.error(f"Error fetching rate: {e}", exc_info=True)
         await message.answer("❌ Не вдалося отримати курс обміну. Спробуйте пізніше.")

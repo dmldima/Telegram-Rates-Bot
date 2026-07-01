@@ -14,6 +14,29 @@ logger = setup_logger(__name__)
 _rate_cache: dict[str, tuple[float, datetime, str]] = {}
 CACHE_TTL = timedelta(hours=1)
 
+# A single aiohttp session is shared across all requests for the lifetime of
+# the app. Creating a new ClientSession per request (as before) opens a fresh
+# TCP connection pool every time, which is a significant, avoidable overhead.
+_session: Optional[aiohttp.ClientSession] = None
+
+
+def _get_session() -> aiohttp.ClientSession:
+    """Return the shared aiohttp session, creating it lazily on first use."""
+    global _session
+    if _session is None or _session.closed:
+        timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
+        _session = aiohttp.ClientSession(timeout=timeout)
+    return _session
+
+
+async def close_session() -> None:
+    """Close the shared session. Call on application shutdown."""
+    global _session
+    if _session is not None and not _session.closed:
+        await _session.close()
+        _session = None
+        logger.info("HTTP session closed")
+
 def _get_cache_key(base: str, target: str, date: str) -> str:
     return f"{base}/{target}:{date}"
 
@@ -35,24 +58,23 @@ def _cache_rate(base: str, target: str, requested_date: str, rate: float, actual
 
 async def _http_json_with_retry(url: str, max_retries: int = MAX_RETRIES) -> Optional[dict]:
     last_error = None
+    session = _get_session()
     for attempt in range(max_retries):
         try:
-            timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        logger.debug(f"Successfully fetched {url}")
-                        return data
-                    elif resp.status == 404:
-                        logger.warning(f"Data not found: {url}")
-                        return None
-                    elif resp.status >= 500:
-                        logger.warning(f"Server error {resp.status}, retrying...")
-                        last_error = f"Server error: {resp.status}"
-                    else:
-                        logger.error(f"Client error {resp.status}: {url}")
-                        return None
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    logger.debug(f"Successfully fetched {url}")
+                    return data
+                elif resp.status == 404:
+                    logger.warning(f"Data not found: {url}")
+                    return None
+                elif resp.status >= 500:
+                    logger.warning(f"Server error {resp.status}, retrying...")
+                    last_error = f"Server error: {resp.status}"
+                else:
+                    logger.error(f"Client error {resp.status}: {url}")
+                    return None
         except asyncio.TimeoutError:
             last_error = "Request timeout"
             logger.warning(f"Timeout on attempt {attempt + 1}/{max_retries}")

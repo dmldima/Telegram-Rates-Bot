@@ -5,6 +5,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from handlers import router
 from config import BOT_TOKEN
+from services.currency_service import close_session
 from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -31,6 +32,7 @@ async def main():
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
     finally:
+        await close_session()
         await bot.session.close()
         logger.info("Bot stopped")
 

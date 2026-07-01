@@ -7,14 +7,11 @@ logger = setup_logger(__name__)
 
 def normalize_code(code: str) -> str:
     code = code.strip()
-    code_lower = code.lower()
-    for alias, canonical in CURRENCY_ALIASES.items():
-        if alias.lower() == code_lower:
-            logger.debug(f"Normalized alias '{code}' to '{canonical}'")
-            return canonical
-    normalized = code.upper()
-    normalized = re.sub(r'[^A-Z]', '', normalized)
-    return normalized
+    canonical = CURRENCY_ALIASES.get(code.lower())
+    if canonical:
+        logger.debug(f"Normalized alias '{code}' to '{canonical}'")
+        return canonical
+    return re.sub(r'[^A-Z]', '', code.upper())
 
 def validate_pair_text(text: str) -> Tuple[str, str]:
     if not text or not text.strip():
@@ -111,13 +108,8 @@ def normalize_amount(amount_str: str) -> float:
     
     try:
         value = float(cleaned)
-        if value < 0:
-            raise ValueError("Amount cannot be negative")
-        if value == 0:
-            raise ValueError("Amount cannot be zero")
-        return value
-    except ValueError as e:
-        logger.error(f"Failed to parse amount '{amount_str}': {e}")
+    except ValueError:
+        logger.error(f"Failed to parse amount '{amount_str}'")
         raise ValueError(
             f"❌ Invalid amount format: {amount_str}\n"
             "Supported formats:\n"
@@ -128,3 +120,11 @@ def normalize_amount(amount_str: str) -> float:
             "• 1'000.50 (Swiss format)\n"
             "• 1.234.567,89 or 1,234,567.89"
         )
+
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ValueError(f"❌ Invalid amount: {amount_str}")
+    if value < 0:
+        raise ValueError("❌ Amount cannot be negative")
+    if value == 0:
+        raise ValueError("❌ Amount cannot be zero")
+    return value

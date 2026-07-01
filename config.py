@@ -5,17 +5,13 @@ Contains supported pairs, aliases, and API settings.
 import os
 from typing import Final
 
-# API Configuration - Primary and Backup sources
+# API Configuration
+# Primary source for major currency pairs.
 FRANKFURTER_BASE_URL: Final[str] = "https://api.frankfurter.app"
-FRANKFURTER_BACKUP_URL: Final[str] = "https://www.frankfurter.app"
-
+# Primary source for UAH pairs (National Bank of Ukraine).
 NBU_BASE_URL: Final[str] = "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange"
-NBU_BACKUP_URL: Final[str] = "https://bank.gov.ua/NBU_Exchange/exchange_site"
-
-# Additional backup APIs for major currencies
+# Backup source for major currencies (latest rates only — no history).
 EXCHANGERATE_API_URL: Final[str] = "https://api.exchangerate-api.com/v4/latest"
-FIXER_API_URL: Final[str] = "https://api.fixer.io/latest"
-ECB_API_URL: Final[str] = "https://sdw-wsrest.ecb.europa.eu/service/data/EXR"
 
 # Fallback behavior
 USE_FALLBACK_DATE: Final[bool] = True
@@ -47,19 +43,22 @@ SUPPORTED_PAIRS: Final[set[str]] = {
     "USD/UAH", "EUR/UAH", "GBP/UAH", "CHF/UAH", "PLN/UAH",
 }
 
-# Currency code aliases
+# Currency code aliases.
+# Keys are matched case-insensitively (see utils.validation.normalize_code),
+# so only lowercase forms are needed here. Keep each alias unique.
 CURRENCY_ALIASES: Final[dict[str, str]] = {
-    "GPB": "GBP", "gpb": "GBP",
-    "UDS": "USD", "uds": "USD",
-    "ERU": "EUR", "eur": "EUR",
-    "DOLLAR": "USD", "EURO": "EUR",
-    "POUND": "GBP", "HRYVNIA": "UAH",
-    "ГРИВНА": "UAH", "ГРИВНЯ": "UAH",
-    "eur": "EUR", "usd": "USD",
-    "gbp": "GBP", "chf": "CHF",
-    "sgd": "SGD", "uah": "UAH",
-    "pln": "PLN", "PLN": "PLN",
-    "злотий": "PLN", "злотий": "PLN",
+    # Common typos
+    "gpb": "GBP",
+    "uds": "USD",
+    "eru": "EUR",
+    # Full names
+    "dollar": "USD",
+    "euro": "EUR",
+    "pound": "GBP",
+    "hryvnia": "UAH",
+    "гривна": "UAH",
+    "гривня": "UAH",
+    "злотий": "PLN",
 }
 
 # Number format variations
